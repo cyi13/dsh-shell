@@ -1,11 +1,14 @@
 name: release
 
-# 打 tag（如 v0.1.0）时自动构建 macOS .app 并发布到 GitHub Releases。
+# 打 tag（如 v0.1.0）时自动构建并发布到 GitHub Releases。
+#   - macOS：组装 DshShell.app 打 zip
+#   - Windows：构建 DshShell.exe 打 zip
 #
-# 注意：当前产物是【未签名/未公证】的（ad-hoc）。GitHub runner 上没有你的
-# Apple Developer 凭据，所以产物仅供本机或已放行 Gatekeeper 的环境使用；
-# 其他用户下载后若提示“已损坏/无法验证”，需 系统设置 → 隐私与安全性 →
-# 仍要打开，或右键 → 打开。接入正式签名公证后再去掉本段说明。
+# 注意：产物均【未签名/未公证】。GitHub runner 上没有 Apple Developer 凭据
+# （Windows 也未接代码签名），所以：
+#   - macOS 产物仅供本机或已放行 Gatekeeper 的环境使用（右键打开/系统设置放行）
+#   - Windows 产物未做 Authenticode 签名，SmartScreen 可能提示
+# 接入正式签名后再去掉本段说明。
 on:
   push:
     tags:
@@ -62,10 +65,52 @@ jobs:
           ditto -c -k --keepParent DshShell.app "DshShell-${{ steps.ver.outputs.version }}-macos.zip"
           ls -la
 
-      - name: 创建 GitHub Release 并上传
+      - name: 创建 GitHub Release 并上传（macOS）
         uses: softprops/action-gh-release@v2
         with:
           files: bin/DshShell-${{ steps.ver.outputs.version }}-macos.zip
           generate_release_notes: true
           draft: false
           prerelease: ${{ contains(github.ref_name, '-') }}
+
+  build-windows:
+    runs-on: windows-latest
+    steps:
+      - name: 检出代码
+        uses: actions/checkout@v4
+
+      - name: 读取 tag 版本号
+        id: ver
+        shell: bash
+        run: |
+          TAG="${GITHUB_REF_NAME#v}"
+          echo "version=$TAG" >> "$GITHUB_OUTPUT"
+          echo "构建版本: $TAG"
+
+      - name: 安装 Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: "1.25"
+
+      - name: 生产构建（注入版本号）
+        shell: bash
+        run: |
+          go build -tags production -trimpath -buildvcs=false \
+            -ldflags="-w -s -X main.version=${{ steps.ver.outputs.version }}" \
+            -o bin/DshShell.exe .
+
+      - name: 打 zip（Windows 分发包）
+        shell: bash
+        run: |
+          cd bin
+          powershell -Command "Compress-Archive -Path DshShell.exe -DestinationPath 'DshShell-${{ steps.ver.outputs.version }}-windows-amd64.zip' -Force"
+          ls -la
+
+      - name: 创建 GitHub Release 并上传（Windows）
+        uses: softprops/action-gh-release@v2
+        with:
+          files: bin/DshShell-${{ steps.ver.outputs.version }}-windows-amd64.zip
+          generate_release_notes: true
+          draft: false
+          prerelease: ${{ contains(github.ref_name, '-') }}
+

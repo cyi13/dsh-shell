@@ -15,8 +15,6 @@ import (
 	"strings"
 	"sync"
 	"time"
-
-	"github.com/creack/pty"
 )
 
 // Status describes the current dsh child lifecycle.
@@ -46,7 +44,7 @@ type Manager struct {
 	port     int
 	extra    []string
 	cmd      *exec.Cmd
-	pty      *os.File // pty master (when running under a pseudo-terminal)
+	child    *dshChild // running child: pty master (unix) / merged pipe (windows)
 	url      string
 	running  bool
 	exit     int
@@ -204,24 +202,22 @@ func (m *Manager) Start() error {
 		cmd.Env = replaceEnv(cmd.Env, "PWD", home)
 	}
 
-	// dsh hangs during startup when it has no controlling terminal (as
-	// happens when spawned from a GUI-launched app: no TTY, stdin=/dev/null).
-	// Run it under a pseudo-terminal so it always has one. The pty master is
-	// what we scan for the printed URL.
-	master, err := pty.Start(cmd)
+	// Spawn the child and get its output stream. On Unix this is a pty (dsh
+	// hangs without a controlling terminal when GUI-launched); on Windows it is
+	// a merged stdout/stderr pipe.
+	child, err := spawnDsh(cmd)
 	if err != nil {
 		m.errMsg = err.Error()
 		m.notifyLocked()
-		return fmt.Errorf("start dsh (pty): %w", err)
+		return err
 	}
-	// Best-effort: set a sane terminal size so dsh doesn't see a 0x0 pty.
-	_ = pty.Setsize(master, &pty.Winsize{Rows: 40, Cols: 120})
-	m.pty = master
-	stdout := master // scan reads the pty master
+	m.child = child
+	cmd = child.cmd // on Windows spawnDsh may wrap a .cmd shim; the real process is child.cmd
+	m.cmd = cmd
+	stdout := child.out // scan reads the pty master / merged pipe
 
 	ctx, cancel := context.WithCancel(context.Background())
 	m.cancel = cancel
-	m.cmd = cmd
 	m.done = make(chan struct{})
 	m.running = true
 	m.exit = 0
@@ -286,10 +282,10 @@ func (m *Manager) wait(cmd *exec.Cmd) {
 		}
 		m.cmd = nil
 		m.cancel = nil
-		// Close the pty master so the scanner goroutine ends.
-		if m.pty != nil {
-			_ = m.pty.Close()
-			m.pty = nil
+		// Close the child's output stream so the scanner goroutine ends.
+		if m.child != nil {
+			m.child.closeOut()
+			m.child = nil
 		}
 		// Auto-restart on unexpected exit (not a user Stop, not app shutdown).
 		if m.AutoRestart && !m.stopping {
@@ -396,22 +392,23 @@ func (m *Manager) Preflight(timeout time.Duration) error {
 		cmd.Env = replaceEnv(cmd.Env, "PWD", h)
 	}
 
-	master, err := pty.Start(cmd)
+	child, err := spawnDsh(cmd)
 	if err != nil {
 		return fmt.Errorf("preflight start: %w", err)
 	}
 	defer func() {
-		_ = master.Close()
-		if cmd.Process != nil {
-			_ = cmd.Process.Kill()
+		child.closeOut()
+		// Kill the actually-started process (on Windows spawnDsh may wrap a
+		// .cmd shim into cmd /C, so the process lives on child.cmd, not cmd).
+		if child.cmd != nil && child.cmd.Process != nil {
+			_ = child.cmd.Process.Kill()
+			_, _ = child.cmd.Process.Wait()
 		}
-		_, _ = cmd.Process.Wait()
 	}()
-	_ = pty.Setsize(master, &pty.Winsize{Rows: 40, Cols: 120})
 
 	ready := make(chan error, 1)
 	go func() {
-		sc := bufio.NewScanner(master)
+		sc := bufio.NewScanner(child.out)
 		sc.Buffer(make([]byte, 0, 64*1024), 1024*1024)
 		for sc.Scan() {
 			line := strings.TrimRight(sc.Text(), "\r")

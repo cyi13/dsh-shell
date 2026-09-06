@@ -132,6 +132,12 @@ go build -o dsh-desktop .
 - **检查时机**：`config.autoUpdate` 开启时启动先检查一次，之后**按 `updateIntervalHours`（默认 6 小时，设置面板可配）周期自动检查**；也可托盘/设置面板随时手动"检查更新"。
 - **通道可配置**：设置面板选择 alpha/stable 并保存，立即按新通道重新检查。
 
+## 平台支持
+
+- **macOS**（主平台）：完整功能，`pty` 启动 dsh（launchd 无 TTY 场景不会卡死）、托盘/深链接/设置窗/平滑重启均可用。
+- **Windows**（实验性）：子进程改用合并 stdout/stderr 管道（Windows 无 pty），`.cmd/.bat` 的 dsh/npm/pnpm 自动经 `cmd /C` 包装；日志在 `%LOCALAPPDATA%\dsh-desktop\logs`。Release 流水线同时产出 `DshShell-<版本>-windows-amd64.zip`。**已知差异**：mac 专属能力（Dock reopen、`dsh://` 深链接、关闭到托盘语义、VS Code 目录检测路径）在 Windows 上不适用或需另行验证；产物未签名（SmartScreen 可能提示）。
+- **验证**：`GOOS=windows go build ./...`、`GOOS=windows go vet ./...` 与 windows 单测（`dshproc_windows_test.go`）在 CI 的 windows-latest 上跑。
+
 ## 验证
 
 ```bash

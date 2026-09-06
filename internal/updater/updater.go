@@ -15,6 +15,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"sync"
 	"time"
@@ -91,8 +92,29 @@ func (u *Updater) logLine(s string) {
 	}
 }
 
+// newCommand builds an exec.Cmd for `name`, wrapping Windows .cmd/.bat/.ps1
+// shims (npm/pnpm/dsh install globally as .cmd on Windows; CreateProcess
+// cannot run them directly, so they go through cmd /C or powershell).
+func newCommand(ctx context.Context, name string, args ...string) *exec.Cmd {
+	if runtime.GOOS != "windows" {
+		return exec.CommandContext(ctx, name, args...)
+	}
+	p := name
+	if resolved, err := exec.LookPath(name); err == nil {
+		p = resolved
+	}
+	switch strings.ToLower(filepath.Ext(p)) {
+	case ".cmd", ".bat":
+		return exec.CommandContext(ctx, "cmd", append([]string{"/C", p}, args...)...)
+	case ".ps1":
+		return exec.CommandContext(ctx, "powershell",
+			append([]string{"-NoProfile", "-ExecutionPolicy", "Bypass", "-File", p}, args...)...)
+	}
+	return exec.CommandContext(ctx, p, args...)
+}
+
 func runCmd(ctx context.Context, name string, args ...string) (string, error) {
-	cmd := exec.CommandContext(ctx, name, args...)
+	cmd := newCommand(ctx, name, args...)
 	var out bytes.Buffer
 	cmd.Stdout = &out
 	cmd.Stderr = &out
@@ -293,7 +315,7 @@ func (u *Updater) Install(ctx context.Context) error {
 	profileDir := u.webProfileDir()
 	if profileDir != "" {
 		u.logLine("refreshing web profile plugins: pnpm update in " + profileDir)
-		cmd := exec.CommandContext(ctx, "pnpm", "update")
+		cmd := newCommand(ctx, "pnpm", "update")
 		cmd.Dir = profileDir
 		var out bytes.Buffer
 		cmd.Stdout = &out

@@ -24,19 +24,18 @@ var appIcon []byte
 
 // setupLogging sends the process log to both stderr and a persistent file so
 // that when the app is launched via `open` (Finder/LaunchServices) the stdout
-// is not lost and we can diagnose startup issues later.
+// is not lost and we can diagnose startup issues later. The file location is
+// platform-specific (defaultLogPath).
 func setupLogging() {
-	home, err := os.UserHomeDir()
-	if err != nil {
-		log.Printf("[desktop] setupLogging: no home dir: %v", err)
+	path := defaultLogPath()
+	if path == "" {
+		log.Printf("[desktop] setupLogging: no default log path")
 		return
 	}
-	dir := filepath.Join(home, "Library", "Logs")
-	if err := os.MkdirAll(dir, 0o755); err != nil {
-		log.Printf("[desktop] setupLogging: mkdir %s: %v", dir, err)
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		log.Printf("[desktop] setupLogging: mkdir %s: %v", path, err)
 		return
 	}
-	path := filepath.Join(dir, "dsh-desktop.log")
 	f, err := os.OpenFile(path, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0o644)
 	if err != nil {
 		log.Printf("[desktop] setupLogging: open %s: %v", path, err)
@@ -46,20 +45,17 @@ func setupLogging() {
 	log.Printf("[desktop] log file: %s", path)
 }
 
-// augmentPath prepends the directories where dsh/npm/pnpm/node typically live.
-// When the app is launched via `open` (Finder / LaunchServices) it does NOT
-// inherit the shell's PATH, so exec.LookPath("dsh") would otherwise fail.
-// Adding these common prefixes makes the child process and updater resolve.
+// augmentPath prepends platform-specific directories where dsh/npm/pnpm/node
+// typically live. When the app is launched via `open` (Finder / LaunchServices)
+// on macOS it does NOT inherit the shell's PATH, so exec.LookPath("dsh") would
+// otherwise fail. On Windows the inherited PATH already covers the npm global
+// bin; extraPathDirs returns the platform list.
 func augmentPath() {
-	home, err := os.UserHomeDir()
-	if err != nil {
+	extra := extraPathDirs()
+	if len(extra) == 0 {
+		log.Printf("[desktop] PATH untouched (dsh=%v npm=%v)",
+			execLookPathOK("dsh"), execLookPathOK("npm"))
 		return
-	}
-	extra := []string{
-		filepath.Join(home, ".local", "bin"),
-		"/usr/local/bin",
-		"/opt/homebrew/bin",
-		"/opt/homebrew/sbin",
 	}
 	current := os.Getenv("PATH")
 	seen := map[string]bool{}
