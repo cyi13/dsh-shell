@@ -1,0 +1,360 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>dsh desktop</title>
+  <style>
+    :root { color-scheme: dark; }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0; min-height: 100vh;
+      font-family: -apple-system, "PingFang SC", "Segoe UI", sans-serif;
+      background: linear-gradient(160deg, #0b0f17 0%, #111827 100%);
+      color: #e5e7eb;
+      display: flex; align-items: center; justify-content: center;
+    }
+    .card {
+      width: 560px; max-width: 92vw;
+      background: rgba(20, 27, 45, 0.85);
+      border: 1px solid #26324a; border-radius: 16px;
+      padding: 32px 36px;
+      box-shadow: 0 20px 60px rgba(0,0,0,0.5);
+    }
+    h1 { font-size: 20px; margin: 0 0 4px; color: #fff; }
+    .sub { color: #8b96ad; font-size: 13px; margin-bottom: 24px; }
+    .row { display: flex; justify-content: space-between; align-items: center; padding: 10px 0; border-bottom: 1px solid #1f2a41; font-size: 14px; }
+    .row:last-child { border-bottom: none; }
+    .row .label { color: #9aa5bd; }
+    .row .val { font-family: ui-monospace, Menlo, monospace; font-size: 13px; color: #dbe4f0; word-break: break-all; text-align: right; }
+    .badge { padding: 2px 10px; border-radius: 999px; font-size: 12px; font-weight: 600; }
+    .badge.ok { background: rgba(52,211,153,0.15); color: #34d399; }
+    .badge.busy { background: rgba(251,191,36,0.15); color: #fbbf24; }
+    .badge.err { background: rgba(248,113,113,0.15); color: #f87171; }
+    .badge.idle { background: rgba(148,163,184,0.15); color: #94a3b8; }
+    .actions { display: flex; gap: 10px; margin-top: 22px; flex-wrap: wrap; }
+    button {
+      flex: 1; min-width: 120px;
+      padding: 10px 14px; border-radius: 10px; border: 1px solid #334155;
+      background: #1c2740; color: #e2e8f0; font-size: 13px; cursor: pointer;
+      transition: background .15s;
+    }
+    button:hover:not(:disabled) { background: #243450; }
+    button:disabled { opacity: 0.5; cursor: not-allowed; }
+    button.primary { background: #2f6feb; border-color: #2f6feb; color: #fff; }
+    button.primary:hover:not(:disabled) { background: #3b7df5; }
+    .log { margin-top: 20px; max-height: 160px; overflow: auto; background: #0a0f1a; border: 1px solid #1f2a41; border-radius: 8px; padding: 10px 12px; font-family: ui-monospace, Menlo, monospace; font-size: 11px; color: #7dd3fc; white-space: pre-wrap; }
+    .hint { color: #6b7688; font-size: 12px; margin-top: 14px; line-height: 1.6; }
+    .cfg { margin-top: 20px; border-top: 1px solid #1f2a41; padding-top: 6px; }
+    .cfg-title { color: #8b96ad; font-size: 12px; text-transform: uppercase; letter-spacing: .5px; margin: 10px 0 2px; }
+    .cfg .field { display: flex; align-items: center; gap: 12px; padding: 9px 0; border-bottom: 1px solid #1f2a41; font-size: 13px; }
+    .cfg .field:last-of-type { border-bottom: none; }
+    .cfg .field .label { color: #9aa5bd; width: 104px; flex: none; font-size: 13px; }
+    .cfg input[type="text"], .cfg input[type="number"], .cfg select {
+      background: #0a0f1a; color: #dbe4f0; border: 1px solid #334155; border-radius: 8px;
+      padding: 6px 10px; font-size: 13px; min-width: 0; width: 100%;
+      font-family: ui-monospace, Menlo, monospace;
+    }
+    .cfg input[type="text"]:focus, .cfg input[type="number"]:focus, .cfg select:focus { outline: none; border-color: #2f6feb; }
+    .cfg input[type="checkbox"] { width: 18px; height: 18px; accent-color: #2f6feb; }
+    .cfg-msg { font-size: 12px; margin-top: 8px; min-height: 16px; }
+
+    /* The settings page (?settings=1) shows the full control panel. The launch
+       splash (no param) is a short transition before auto-navigation to dsh, so
+       it shows only basic status info — no config form, no admin buttons. */
+    body.mode-splash .cfg { display: none; }
+    body.mode-splash .manage-only { display: none; }
+  </style>
+</head>
+<body>
+  <div class="card">
+    <h1>dsh desktop</h1>
+    <div class="sub" id="subTitle">DeepSeek Harness 桌面壳 · 正在启动 dsh…</div>
+
+    <div class="row"><span class="label">dsh 状态</span><span class="val"><span id="dshStatus" class="badge busy">启动中</span></span></div>
+    <div class="row"><span class="label">dsh 版本</span><span class="val" id="dshVersion">…</span></div>
+    <div class="row"><span class="label">dsh 地址</span><span class="val" id="dshUrl">等待中</span></div>
+    <div class="row"><span class="label">更新状态</span><span class="val" id="updateStatus">…</span></div>
+    <div class="row"><span class="label">最新版本</span><span class="val" id="updateLatest">…</span></div>
+
+    <div class="actions">
+      <button id="btnOpen" class="primary" disabled>在浏览器打开</button>
+      <button id="btnRestart" class="manage-only">重启 dsh</button>
+      <button id="btnCheck" class="manage-only">检查更新</button>
+      <button id="btnInstall" class="manage-only" disabled>安装更新</button>
+    </div>
+
+    <div class="cfg">
+      <div class="cfg-title">配置（保存后生效）</div>
+      <div class="field"><span class="label">端口</span><input id="cfgPort" type="number" min="0" max="65535" /></div>
+      <div class="field"><span class="label">DSH_HOME</span><input id="cfgHome" type="text" placeholder="留空 = ~/.dsh" /></div>
+      <div class="field"><span class="label">dsh 路径</span><input id="cfgBin" type="text" placeholder="留空 = PATH 查找" /></div>
+      <div class="field"><span class="label">更新通道</span>
+        <select id="cfgChannel">
+          <option value="alpha">alpha（预发布 · 默认）</option>
+          <option value="stable">stable（latest）</option>
+        </select>
+      </div>
+      <div class="field"><span class="label">自动检查更新</span><input id="cfgAutoUpdate" type="checkbox" /></div>
+      <div class="field"><span class="label">检查间隔(小时)</span><input id="cfgInterval" type="number" min="1" max="720" /></div>
+      <div class="field"><span class="label">关闭不退出</span><input id="cfgCloseToTray" type="checkbox" /></div>
+      <div class="field"><span class="label">启动最大化</span><input id="cfgStartMaximized" type="checkbox" /></div>
+      <div class="field"><span class="label">同步到 VS Code</span><input id="cfgSyncVscode" type="checkbox" /></div>
+      <div class="field" id="vscodeHintRow" style="display:none"><span class="label"></span><span class="cfg-msg" id="vscodeHint" style="color:#8b96ad;margin-top:0"></span></div>
+      <div class="actions">
+        <button id="btnSaveCfg">保存配置</button>
+      </div>
+      <div class="cfg-msg" id="cfgMsg"></div>
+    </div>
+
+    <div class="log" id="log">–</div>
+    <div class="hint" id="hintEl">dsh 就绪后本窗口将自动进入 dsh 界面。需要管理 dsh 或修改配置时，从托盘菜单进入"设置面板"。</div>
+  </div>
+
+  <script type="module">
+    import { Call, Events } from "/wails/runtime.js";
+
+    // ?settings=1 opens the full settings panel; otherwise this is the launch
+    // splash (auto-navigates to dsh once ready) which shows only basic info.
+    const IS_SETTINGS = new URLSearchParams(location.search).has("settings");
+    document.body.classList.add(IS_SETTINGS ? "mode-settings" : "mode-splash");
+    document.getElementById("subTitle").textContent = IS_SETTINGS
+      ? "DeepSeek Harness 桌面壳 · 设置面板"
+      : "DeepSeek Harness 桌面壳 · 正在启动 dsh…";
+    const hintEl = document.getElementById("hintEl");
+    if (hintEl) {
+      hintEl.textContent = IS_SETTINGS
+        ? "修改端口/路径会在保存后平滑重启 dsh（窗口不关）。关闭本窗口（标题栏 ✕ 或按 Esc）即回到 dsh 主界面，不会刷新。"
+        : "dsh 就绪后本窗口将自动进入 dsh 界面。需要管理 dsh 或修改配置时，从托盘菜单进入\"设置面板\"。";
+    }
+
+    // Method IDs come from `wails3 generate bindings` (shellservice.js). ByID
+    // is deterministic and avoids FQN/name-resolution pitfalls.
+    const M = {
+      GetStatus: 1868121791,
+      StartDsh: 1926943612,
+      RestartDsh: 2831811313,
+      StopDsh: 812313742,
+      CheckUpdate: 3586644892,
+      InstallUpdate: 3957093619,
+      OpenInBrowser: 4117313204,
+      ShowDsh: 3288707789,
+      GetConfig: 2350254391,
+      SaveConfig: 1910403504,
+      VscodeDshSessionsDetected: 3397065383,
+    };
+    async function callByID(id, ...args) {
+      try {
+        return await Call.ByID(id, ...args);
+      } catch (e) {
+        console.error("[shell] call failed id=" + id, e);
+        return null;
+      }
+    }
+
+    async function refresh() {
+      const st = await callByID(M.GetStatus);
+      if (!st) {
+        // Diagnostic: bind call failed — surface it so we can see why the
+        // splash would never navigate.
+        const el = document.getElementById("dshStatus");
+        if (el) { el.textContent = "bind 失败 (GetStatus)"; el.className = "badge err"; }
+        console.error("[splash] GetStatus returned null");
+        return;
+      }
+      const dsh = st.dsh, upd = st.update;
+      // Auto-navigate to dsh only when this is a fresh app launch (not the
+      // settings panel). The settings panel is opened with ?settings=1 and
+      // must stay put; the auto-nav runs once per launch via sessionStorage.
+      const autoDone = sessionStorage.getItem("dsh_auto_nav") === "1";
+      if (!IS_SETTINGS && !autoDone && dsh && dsh.url) {
+        sessionStorage.setItem("dsh_auto_nav", "1");
+        setTimeout(() => { window.location.replace(dsh.url); }, 200);
+        return;
+      }
+      const statusEl = document.getElementById("dshStatus");
+      if (dsh.running && dsh.url) {
+        statusEl.textContent = "运行中 (PID " + dsh.pid + ")";
+        statusEl.className = "badge ok";
+      } else if (dsh.running) {
+        statusEl.textContent = "dsh 启动中 (PID " + dsh.pid + ")…";
+        statusEl.className = "badge busy";
+      } else if (dsh.err) {
+        statusEl.textContent = "启动失败";
+        statusEl.className = "badge err";
+      } else {
+        statusEl.textContent = "正在启动 dsh…";
+        statusEl.className = "badge busy";
+      }
+      document.getElementById("dshVersion").textContent = upd.currentVersion || "未知";
+      document.getElementById("dshUrl").textContent = dsh.url || "（等待就绪）";
+      document.getElementById("updateStatus").textContent =
+        upd.installing ? "安装中…" :
+        upd.checking ? "检查中…" :
+        upd.updateAvailable ? "有新版本" :
+        upd.lastError ? "检查出错" :
+        (upd.lastCheck ? "已是最新" : "未检查");
+      document.getElementById("updateLatest").textContent = upd.latestVersion || "—";
+      document.getElementById("btnOpen").disabled = !dsh.url;
+      // Give visible feedback while an update check/install is in flight.
+      const btnCheck = document.getElementById("btnCheck");
+      const btnInstall = document.getElementById("btnInstall");
+      if (btnCheck) {
+        btnCheck.disabled = !!upd.checking || !!upd.installing;
+        btnCheck.textContent = upd.checking ? "检查中…" : "检查更新";
+      }
+      if (btnInstall) {
+        btnInstall.disabled = !upd.updateAvailable || !!upd.checking || !!upd.installing;
+        btnInstall.textContent = upd.installing ? "安装中…" : "安装更新";
+      }
+      // Re-arm the restart button unless a restart is in progress.
+      const btnRestart = document.getElementById("btnRestart");
+      if (btnRestart && !restartingNow) { btnRestart.disabled = false; btnRestart.textContent = "重启 dsh"; }
+      const logEl = document.getElementById("log");
+      if (logEl) {
+        const errLine = upd.lastError ? ("⚠ " + upd.lastError + "\n") : "";
+        const lines = (upd.log && upd.log.length) ? upd.log.slice(-8).join("\n") : "";
+        logEl.textContent = (errLine + lines) || "–";
+      }
+      if (!formFilled && st.config) { populateForm(st.config); formFilled = true; }
+    }
+
+    // ---- config form ----
+    let formFilled = false;
+    function populateForm(cfg) {
+      if (!cfg) return;
+      document.getElementById("cfgPort").value = cfg.port || 3080;
+      document.getElementById("cfgHome").value = cfg.homeDir || "";
+      document.getElementById("cfgBin").value = cfg.dshBin || "";
+      document.getElementById("cfgChannel").value = cfg.channel || "alpha";
+      document.getElementById("cfgAutoUpdate").checked = cfg.autoUpdate !== false;
+      document.getElementById("cfgInterval").value = cfg.updateIntervalHours || 6;
+      document.getElementById("cfgCloseToTray").checked = cfg.closeToTray !== false;
+      document.getElementById("cfgStartMaximized").checked = cfg.startMaximized !== false;
+      document.getElementById("cfgSyncVscode").checked = !!cfg.syncVscodeURL;
+    }
+
+    // Show whether the dsh-sessions VS Code extension is installed, so the
+    // "同步到 VS Code" switch conveys whether it will actually do anything.
+    async function refreshVscodeHint() {
+      const row = document.getElementById("vscodeHintRow");
+      const el = document.getElementById("vscodeHint");
+      if (!row || !el) return;
+      const installed = await callByID(M.VscodeDshSessionsDetected);
+      if (installed) {
+        row.style.display = "";
+        el.textContent = "已检测到 dsh-sessions 扩展：dsh 就绪时会自动把 URL 同步到其 baseUrl。";
+        el.style.color = "#34d399";
+      } else {
+        row.style.display = "";
+        el.textContent = "未检测到 dsh-sessions 扩展，同步不会生效。";
+        el.style.color = "#fbbf24";
+      }
+    }
+    async function saveConfig() {
+      const st = await callByID(M.GetStatus);
+      const msg = document.getElementById("cfgMsg");
+      if (!st || !st.config) { if (msg) { msg.textContent = "无法读取当前配置"; msg.style.color = "#f87171"; } return; }
+      const old = st.config;
+      const cfg = {
+        port: parseInt(document.getElementById("cfgPort").value, 10) || 0,
+        homeDir: document.getElementById("cfgHome").value.trim(),
+        dshBin: document.getElementById("cfgBin").value.trim(),
+        channel: document.getElementById("cfgChannel").value,
+        autoUpdate: document.getElementById("cfgAutoUpdate").checked,
+        closeToTray: document.getElementById("cfgCloseToTray").checked,
+        startMaximized: document.getElementById("cfgStartMaximized").checked,
+        syncVscodeURL: document.getElementById("cfgSyncVscode").checked,
+        updateIntervalHours: parseInt(document.getElementById("cfgInterval").value, 10) || 6,
+        extraArgs: old.extraArgs || [],
+      };
+      const btn = document.getElementById("btnSaveCfg");
+      if (btn) { btn.disabled = true; btn.textContent = "保存中…"; }
+      const res = await callByID(M.SaveConfig, cfg);
+      if (btn) { btn.disabled = false; btn.textContent = "保存配置"; }
+      if (res === null) {
+        if (msg) { msg.textContent = "保存失败，请查看日志"; msg.style.color = "#f87171"; }
+        return;
+      }
+      const changedRestart = cfg.port !== old.port || cfg.homeDir !== old.homeDir ||
+        cfg.dshBin !== old.dshBin || JSON.stringify(cfg.extraArgs||[]) !== JSON.stringify(old.extraArgs||[]);
+      const changedStartMax = cfg.startMaximized !== !!old.startMaximized;
+      const changedAuto = cfg.autoUpdate !== !!old.autoUpdate ||
+        cfg.updateIntervalHours !== old.updateIntervalHours;
+      const changedVscode = cfg.syncVscodeURL !== !!old.syncVscodeURL;
+      if (msg) {
+        msg.textContent = changedRestart
+          ? "已保存，正在平滑重启 dsh…（窗口保持）"
+          : changedStartMax ? "已保存。启动最大化将在下次启动 DshShell 时生效"
+          : changedAuto ? "已保存。自动检查已按新间隔生效"
+          : changedVscode ? (cfg.syncVscodeURL ? "已保存。下次 dsh 就绪时会同步 URL 到 VS Code" : "已保存。已关闭 VS Code URL 同步")
+          : cfg.channel !== old.channel ? "已保存，正在按新通道检查更新…" : "已保存";
+        msg.style.color = "#34d399";
+      }
+      setTimeout(() => { if (msg) msg.textContent = ""; formFilled = false; refresh(); }, 2000);
+    }
+
+    function openInBrowser() { callByID(M.OpenInBrowser); }
+    let restartingNow = false;
+    async function restartDsh() {
+      if (restartingNow) return;
+      restartingNow = true;
+      const b = document.getElementById("btnRestart");
+      if (b) { b.disabled = true; b.textContent = "重启中…"; }
+      try {
+        await callByID(M.RestartDsh); // Go 侧会平滑重启并保持窗口
+      } finally {
+        setTimeout(() => { restartingNow = false; refresh(); }, 1200);
+      }
+    }
+    async function checkUpdate() {
+      // Give immediate feedback: disable + "检查中…" right away; the 3s
+      // GetStatus poll (refresh) clears it when the check finishes.
+      const b = document.getElementById("btnCheck");
+      if (b) { b.disabled = true; b.textContent = "检查中…"; }
+      const st0 = await callByID(M.GetStatus);
+      if (st0) document.getElementById("updateStatus").textContent = "检查中…";
+      await callByID(M.CheckUpdate);
+      setTimeout(refresh, 300);
+    }
+    async function installUpdate() {
+      const b = document.getElementById("btnInstall");
+      if (b) { b.disabled = true; b.textContent = "安装中…"; }
+      await callByID(M.InstallUpdate);
+      setTimeout(refresh, 500);
+    }
+
+    // Close the settings window: emit a custom event that the Go side listens
+    // for (it hides the settings window and refocuses the main dsh window).
+    // Esc is handled natively by the window's HideOnEscape, plus this page
+    // fallback for robustness. The system title-bar close (red traffic light)
+    // is handled by the WindowClosing hook in main.go.
+    function closeSettings() {
+      Events.Emit("settings:close");
+    }
+
+    // Bind buttons explicitly. This page is a <script type="module">, whose
+    // top-level functions are NOT globals, so inline `onclick="fn()"` handlers
+    // would resolve nothing and every button would appear dead. attachEvent
+    // wires them up directly instead.
+    function attachEvent(id, handler) {
+      const el = document.getElementById(id);
+      if (el) el.addEventListener("click", handler);
+    }
+    attachEvent("btnOpen", openInBrowser);
+    attachEvent("btnRestart", restartDsh);
+    attachEvent("btnCheck", checkUpdate);
+    attachEvent("btnInstall", installUpdate);
+    attachEvent("btnSaveCfg", saveConfig);
+
+    // Esc also closes the settings window (only while this page is showing).
+    document.addEventListener("keydown", (e) => {
+      if (e.key === "Escape" && IS_SETTINGS) closeSettings();
+    });
+
+    refresh();
+    if (IS_SETTINGS) refreshVscodeHint();
+    setInterval(refresh, 3000);
+  </script>
+</body>
+</html>

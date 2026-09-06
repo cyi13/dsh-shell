@@ -1,0 +1,13 @@
+# 编译产物
+/dsh-desktop
+/bin/
+
+# Wails 自动生成绑定（勿提交，wails3 generate bindings 重新生成）
+/frontend/bindings/
+
+# macOS
+.DS_Store
+
+# 日志 / 临时
+*.log
+.gocache/
