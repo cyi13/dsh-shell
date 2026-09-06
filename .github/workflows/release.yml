@@ -92,6 +92,11 @@ jobs:
         with:
           go-version: "1.25"
 
+      - name: 跑 Windows 分支测试（真实执行管道 spawn / URL 扫描）
+        shell: bash
+        run: |
+          go test ./internal/dshproc/ ./internal/updater/
+
       - name: 生产构建（注入版本号）
         shell: bash
         run: |
