@@ -1,0 +1,71 @@
+name: release
+
+# 打 tag（如 v0.1.0）时自动构建 macOS .app 并发布到 GitHub Releases。
+#
+# 注意：当前产物是【未签名/未公证】的（ad-hoc）。GitHub runner 上没有你的
+# Apple Developer 凭据，所以产物仅供本机或已放行 Gatekeeper 的环境使用；
+# 其他用户下载后若提示“已损坏/无法验证”，需 系统设置 → 隐私与安全性 →
+# 仍要打开，或右键 → 打开。接入正式签名公证后再去掉本段说明。
+on:
+  push:
+    tags:
+      - "v*"
+
+permissions:
+  contents: write
+
+jobs:
+  build-macos:
+    runs-on: macos-latest
+    steps:
+      - name: 检出代码
+        uses: actions/checkout@v4
+
+      - name: 读取 tag 版本号（去掉 v 前缀，如 v0.1.0 → 0.1.0）
+        id: ver
+        run: |
+          TAG="${GITHUB_REF_NAME#v}"
+          echo "version=$TAG" >> "$GITHUB_OUTPUT"
+          echo "构建版本: $TAG"
+
+      - name: 安装 Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: "1.25"
+
+      - name: 生产构建（注入版本号）
+        run: |
+          go build -tags production -trimpath -buildvcs=false \
+            -ldflags="-w -s -X main.version=${{ steps.ver.outputs.version }}" \
+            -o bin/dsh-desktop .
+
+      - name: 组装 .app bundle
+        run: |
+          APP="bin/DshShell.app"
+          rm -rf "$APP"
+          mkdir -p "$APP/Contents/MacOS" "$APP/Contents/Resources"
+          cp bin/dsh-desktop "$APP/Contents/MacOS/DshShell"
+          cp build/darwin/icon.icns "$APP/Contents/Resources/icon.icns"
+          cp build/darwin/Info.plist "$APP/Contents/Info.plist"
+          /usr/libexec/PlistBuddy -c "Set :CFBundleExecutable DshShell" "$APP/Contents/Info.plist" 2>/dev/null || true
+          /usr/libexec/PlistBuddy -c "Set :CFBundleName DshShell" "$APP/Contents/Info.plist" 2>/dev/null || true
+          /usr/libexec/PlistBuddy -c "Set :CFBundleIdentifier com.dsh.desktop" "$APP/Contents/Info.plist" 2>/dev/null || true
+          /usr/libexec/PlistBuddy -c "Set :CFBundleShortVersionString ${{ steps.ver.outputs.version }}" "$APP/Contents/Info.plist" 2>/dev/null || true
+          /usr/libexec/PlistBuddy -c "Set :CFBundleVersion ${{ steps.ver.outputs.version }}" "$APP/Contents/Info.plist" 2>/dev/null || true
+          # ad-hoc 签名（让 .app 结构完整、本机可运行）
+          codesign --force --deep --sign - "$APP"
+          echo "bundle 组装完成"
+
+      - name: 打 zip（macOS 分发标准格式）
+        run: |
+          cd bin
+          ditto -c -k --keepParent DshShell.app "DshShell-${{ steps.ver.outputs.version }}-macos.zip"
+          ls -la
+
+      - name: 创建 GitHub Release 并上传
+        uses: softprops/action-gh-release@v2
+        with:
+          files: bin/DshShell-${{ steps.ver.outputs.version }}-macos.zip
+          generate_release_notes: true
+          draft: false
+          prerelease: ${{ contains(github.ref_name, '-') }}

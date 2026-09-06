@@ -337,6 +337,11 @@ func (s *ShellService) ServiceShutdown() error {
 }
 
 // Status is the aggregate snapshot the UI polls.
+// version is the shell's own version. Default "0.1.0"; overridden at build
+// time via -ldflags "-X main.version=vX.Y.Z" (see the release workflow) so the
+// app reports the tag it was built from.
+var version = "0.1.0"
+
 type Status struct {
 	Dsh     dshproc.Status `json:"dsh"`
 	Update  updater.State  `json:"update"`
@@ -350,7 +355,7 @@ func (s *ShellService) GetStatus() Status {
 		Dsh:     s.proc.StatusSnapshot(),
 		Update:  s.updater.StateSnapshot(),
 		Config:  s.cfg,
-		Version: "0.1.0",
+		Version: version,
 	}
 }
 
